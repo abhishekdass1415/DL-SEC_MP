@@ -1,0 +1,4 @@
+# Place your model files here:
+# - final_cnn_lstm.keras (or your model file)
+# - scaler.pkl
+

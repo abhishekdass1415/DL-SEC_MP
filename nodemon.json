@@ -1,0 +1,13 @@
+{
+  "watch": [
+    "backend/**/*.py"
+  ],
+  "ext": "py",
+  "ignore": [
+    "backend/models/**",
+    "backend/__pycache__/**",
+    "**/node_modules/**"
+  ],
+  "restartable": "rs",
+  "verbose": false
+}

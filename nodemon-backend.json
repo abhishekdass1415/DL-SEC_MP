@@ -1,0 +1,10 @@
+{
+  "watch": [
+    "backend/**/*.py",
+    "backend/*.py"
+  ],
+  "ext": "py",
+  "exec": ".\\.venv\\Scripts\\python.exe backend\\app.py",
+  "signal": "SIGINT",
+  "restartable": "rs"
+}

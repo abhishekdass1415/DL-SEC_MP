@@ -1,0 +1,34 @@
+{
+  "name": "dl-sec-dashboard",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "npm --prefix frontend run dev",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "dev:frontend:watch": "nodemon --watch frontend/vite.config.* --watch frontend/.env --watch frontend/.env.* --watch frontend/package.json --signal SIGINT --exec \"npm --prefix frontend run dev\"",
+    "dev:backend": "nodemon --config nodemon-backend.json",
+    "dev:all": "concurrently -n FRONTEND,BACKEND -c cyan,magenta \"npm:dev\" \"npm:dev:backend\"",
+    "start": "npm run dev:all",
+    "start:frontend": "npm --prefix frontend run dev",
+    "start:backend": "npm run dev:backend",
+    "start:py": ".\\.venv\\Scripts\\python.exe backend\\app.py",
+    "build": "npm --prefix frontend run build",
+    "preview": "npm --prefix frontend run preview"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "recharts": "^2.10.3",
+    "lucide-react": "^0.294.0",
+    "axios": "^1.6.2",
+    "socket.io-client": "^4.6.1",
+    "react-router-dom": "^6.26.2"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.2.1",
+    "vite": "^5.0.8",
+    "nodemon": "^3.1.7",
+    "concurrently": "^9.0.1"
+  }
+}
+

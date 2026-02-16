@@ -1,0 +1,76 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-dark-bg text-white;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+      'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-dark-card rounded-xl p-6 border border-dark-border shadow-lg;
+  }
+  
+  .card-hover {
+    @apply transition-all duration-300 hover:border-primary-cyan/50 hover:shadow-xl hover:shadow-primary-cyan/10;
+  }
+  
+  .btn-primary {
+    @apply px-4 py-2 bg-primary-blue text-white rounded-lg font-medium 
+           transition-all duration-200 hover:bg-primary-blue/90 hover:shadow-lg 
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  
+  .btn-success {
+    @apply px-4 py-2 bg-primary-green text-white rounded-lg font-medium 
+           transition-all duration-200 hover:bg-primary-green/90 hover:shadow-lg 
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  
+  .btn-danger {
+    @apply px-4 py-2 bg-primary-red text-white rounded-lg font-medium 
+           transition-all duration-200 hover:bg-primary-red/90 hover:shadow-lg 
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  
+  .badge {
+    @apply px-2 py-1 rounded-md text-xs font-semibold;
+  }
+  
+  .badge-low {
+    @apply bg-severity-low/20 text-severity-low border border-severity-low/30;
+  }
+  
+  .badge-medium {
+    @apply bg-severity-medium/20 text-severity-medium border border-severity-medium/30;
+  }
+  
+  .badge-high {
+    @apply bg-severity-high/20 text-severity-high border border-severity-high/30;
+  }
+  
+  .badge-critical {
+    @apply bg-severity-critical/20 text-severity-critical border border-severity-critical/30;
+  }
+  
+  .stat-card {
+    @apply bg-gradient-to-br from-dark-card to-dark-surface rounded-xl p-6 
+           border border-dark-border shadow-lg;
+  }
+  
+  .stat-value {
+    @apply text-3xl font-bold bg-gradient-to-r from-primary-cyan to-primary-blue 
+           bg-clip-text text-transparent;
+  }
+  
+  .stat-label {
+    @apply text-sm text-gray-400 mt-1;
+  }
+}
+

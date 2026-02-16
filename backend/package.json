@@ -1,0 +1,10 @@
+{
+  "name": "dl-sec-backend",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Backend runner scripts for Flask with nodemon",
+  "scripts": {
+    "start": "npx nodemon --config ../nodemon.json --watch . --ext py --signal SIGINT --exec \"..\\.venv\\Scripts\\python.exe\" app.py",
+    "start:py": "..\\.venv\\Scripts\\python.exe app.py"
+  }
+}
