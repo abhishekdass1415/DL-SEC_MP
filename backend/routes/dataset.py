@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
 import os
 import sys
+import threading
 from werkzeug.utils import secure_filename
 
 # Add backend directory to path for imports
@@ -12,6 +13,9 @@ from services.dataset_service import dataset_service
 from services.data_simulator import data_simulator
 from services.model_service import model_service
 from services.metrics_service import metrics_service
+from services.streaming_service import streaming_service
+from database.models import StreamingSession, Alert, Threat, Prediction
+from database.db import db
 import logging
 
 # Import socketio from app - will be set by app.py
@@ -22,8 +26,8 @@ logger = logging.getLogger(__name__)
 
 dataset_bp = Blueprint('dataset', __name__)
 
-# Configure upload folder
-UPLOAD_FOLDER = os.path.join(backend_dir, 'uploads')
+# Configure upload folder (datasets directory as persistent storage)
+UPLOAD_FOLDER = os.path.join(backend_dir, 'datasets')
 ALLOWED_EXTENSIONS = {'csv', 'xlsx', 'xls'}
 
 # Create upload folder if it doesn't exist
@@ -33,9 +37,46 @@ def allowed_file(filename):
     """Check if file extension is allowed"""
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
+import hashlib
+def _get_pseudo_ip(record, threat_type=None, is_source=True):
+    """Generate a consistent mock IP to group missing attributes."""
+    ip = record.get('srcip' if is_source else 'dstip') or record.get('source_ip' if is_source else 'destination_ip')
+    if ip and ip != 'Unknown':
+        return ip
+        
+    base_string = str(threat_type if threat_type else record.get('id', 'unknown'))
+    if not is_source:
+        base_string += "_dest"
+        
+    hash_val = int(hashlib.md5(base_string.encode()).hexdigest(), 16)
+    prefix = "192.168.1." if is_source else "10.0.0."
+    return f"{prefix}{(hash_val % 254) + 1}"
+
+
+def _make_json_serializable(obj):
+    """Convert numpy/pandas types to native Python so jsonify() never blocks or fails."""
+    import numpy as np
+    if hasattr(obj, 'item'):  # numpy scalar
+        return obj.item()
+    if isinstance(obj, (np.integer,)):
+        return int(obj)
+    if isinstance(obj, (np.floating,)):
+        return float(obj)
+    if isinstance(obj, (np.ndarray,)):
+        return obj.tolist()
+    if isinstance(obj, dict):
+        return {k: _make_json_serializable(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_make_json_serializable(v) for v in obj]
+    return obj
+
+
 @dataset_bp.route('/upload', methods=['POST'])
 def upload_dataset():
     """Upload and load a dataset file"""
+    import time
+    start_time = time.time()
+
     try:
         logger.info("Upload request received")
         
@@ -53,7 +94,7 @@ def upload_dataset():
             logger.error(f"Invalid file type: {file.filename}")
             return jsonify({'error': 'Invalid file type. Only CSV and Excel files are allowed'}), 400
         
-        # Save file
+        # Save file into backend/datasets
         logger.info(f"Saving file: {file.filename}")
         filename = secure_filename(file.filename)
         file_path = os.path.join(UPLOAD_FOLDER, filename)
@@ -66,20 +107,73 @@ def upload_dataset():
         logger.info(f"Dataset load result: {result.get('success', False)}")
         
         if result['success']:
+            total_records = int(result.get('total_records', 0))
+
             # Configure data simulator to use dataset
             data_simulator.set_dataset_service(dataset_service)
-            # Update high-level metrics
-            metrics_service.on_dataset_loaded(result.get('total_records', 0))
-            logger.info(f"Dataset loaded successfully: {result.get('total_records', 0)} records")
 
-            return jsonify(result), 200
+            # Create a StreamingSession record for this dataset
+            dataset_name = filename
+            try:
+                session = StreamingSession(
+                    dataset_name=dataset_name,
+                    file_path=file_path,
+                    total_records=total_records,
+                    processed_records=0,
+                    status='ready',
+                )
+                db.session.add(session)
+                db.session.commit()
+                session_id = session.id
+            except Exception as e:
+                logger.error(f"Failed to create StreamingSession: {e}", exc_info=True)
+                db.session.rollback()
+                session_id = None
+
+            # Update high-level metrics in a background thread so upload stays non-blocking
+            def update_metrics_async(total_records_inner: int) -> None:
+                try:
+                    metrics_service.on_dataset_loaded(total_records_inner)
+                except Exception as exc:
+                    logger.error(f"Metrics update failed: {exc}")
+
+            threading.Thread(
+                target=update_metrics_async,
+                args=(total_records,),
+                daemon=True,
+            ).start()
+
+            logger.info(f"Dataset loaded successfully: {total_records} records")
+
+            processing_time = time.time() - start_time
+            logger.info(f"Upload processing time: {processing_time:.2f} seconds")
+
+            # Build response with JSON-serializable values only (avoid numpy types blocking jsonify)
+            response_payload = {
+                'success': True,
+                'file_path': str(result.get('file_path', '')),
+                'total_records': total_records,
+                'columns': list(result.get('columns', [])),
+                'sample_record': _make_json_serializable(result.get('sample_record', {})),
+                # Streaming session metadata for new pipeline
+                'dataset_name': dataset_name,
+                'session_id': session_id,
+            }
+            logger.info("Returning upload response 200")
+            return jsonify(response_payload), 200
         else:
             logger.error(f"Dataset load failed: {result.get('error', 'Unknown error')}")
-            return jsonify(result), 500
-            
+            processing_time = time.time() - start_time
+            logger.info(f"Upload processing time (failed): {processing_time:.2f} seconds")
+            response_payload = {'success': False, 'error': str(result.get('error', 'Unknown error'))}
+            return jsonify(response_payload), 500
+
     except Exception as e:
         logger.error(f"Error uploading dataset: {str(e)}", exc_info=True)
+        processing_time = time.time() - start_time
+        logger.info(f"Upload processing time (exception): {processing_time:.2f} seconds")
         return jsonify({'error': str(e)}), 500
+
 
 @dataset_bp.route('/load', methods=['POST'])
 def load_dataset():
@@ -146,36 +240,65 @@ def process_dataset():
             
             # Make prediction
             prediction = model_service.predict(record)
-            
-            # If threat detected, create threat record
             is_threat = bool(prediction.get('is_threat'))
+
+            threat = None
             if is_threat:
-                from database.models import Threat
-                from database.db import db
                 from services.action_service import action_service
-                
+
                 threat = Threat(
                     threat_type=prediction['threat_type'],
                     severity=prediction['severity'],
-                    source_ip=record.get('srcip', record.get('source_ip', 'Unknown')),
-                    destination_ip=record.get('dstip', record.get('destination_ip', 'Unknown')),
+                    source_ip=_get_pseudo_ip(record, prediction['threat_type'], True),
+                    destination_ip=_get_pseudo_ip(record, prediction['threat_type'], False),
                     confidence=prediction['confidence'],
                     details=record,
                     status='active'
                 )
-                
                 db.session.add(threat)
-                db.session.commit()
-                
+                db.session.flush()
+
+                alert = Alert(
+                    attack_type=prediction['threat_type'],
+                    severity=prediction['severity'],
+                    source_ip=threat.source_ip,
+                    destination_ip=threat.destination_ip,
+                    confidence=prediction['confidence'],
+                    threat_id=threat.id,
+                )
+                db.session.add(alert)
+
+            # Log prediction row
+            pred_row = Prediction(
+                source_type='dataset',
+                session_id=None,
+                threat_id=threat.id if threat else None,
+                is_threat=is_threat,
+                label='attack' if is_threat else 'benign',
+                severity=prediction.get('severity'),
+                attack_type=prediction.get('threat_type'),
+                confidence=float(prediction.get('confidence', 0.0) or 0.0),
+                raw_score=float(prediction.get('raw_prediction', 0.0) or 0.0),
+                source_ip=_get_pseudo_ip(record, prediction.get('threat_type'), True),
+                destination_ip=_get_pseudo_ip(record, prediction.get('threat_type'), False),
+            )
+            db.session.add(pred_row)
+            db.session.commit()
+
+            if is_threat:
+                from services.action_service import action_service
+
                 # Generate actions
                 actions = action_service.generate_actions(threat)
                 
-                # Emit real-time update
+                # Emit real-time updates
                 if socketio:
                     socketio.emit('new_threat', {
                         'threat': threat.to_dict(),
-                        'actions': [action.to_dict() for action in actions]
+                        'actions': [action.to_dict() for action in actions],
+                        'prediction': prediction,
                     })
+                    socketio.emit('alert', alert.to_dict())
                 
                 # Update high-level metrics
                 metrics_service.on_record_processed(is_threat=True)
@@ -211,34 +334,58 @@ def process_dataset():
                 # Update high-level metrics per record
                 metrics_service.on_record_processed(is_threat=is_threat)
 
-                # Create threat if detected
-                if prediction.get('is_threat'):
-                    from database.models import Threat
-                    from database.db import db
+                # Create threat + alert + prediction if detected, else prediction only
+                threat = None
+                if is_threat:
                     from services.action_service import action_service
                     
                     threat = Threat(
                         threat_type=prediction['threat_type'],
                         severity=prediction['severity'],
-                        source_ip=record.get('srcip', record.get('source_ip', 'Unknown')),
-                        destination_ip=record.get('dstip', record.get('destination_ip', 'Unknown')),
+                        source_ip=_get_pseudo_ip(record, prediction['threat_type'], True),
+                        destination_ip=_get_pseudo_ip(record, prediction['threat_type'], False),
                         confidence=prediction['confidence'],
                         details=record,
                         status='active'
                     )
-                    
                     db.session.add(threat)
-                    db.session.commit()
-                    
+                    db.session.flush()
+
+                    alert = Alert(
+                        attack_type=prediction['threat_type'],
+                        severity=prediction['severity'],
+                        source_ip=threat.source_ip,
+                        destination_ip=threat.destination_ip,
+                        confidence=prediction['confidence'],
+                        threat_id=threat.id,
+                    )
+                    db.session.add(alert)
+
                     # Generate actions
                     actions = action_service.generate_actions(threat)
-                    
-                    # Emit real-time update
+
                     if socketio:
                         socketio.emit('new_threat', {
                             'threat': threat.to_dict(),
                             'actions': [action.to_dict() for action in actions]
                         })
+                        socketio.emit('alert', alert.to_dict())
+
+                pred_row = Prediction(
+                    source_type='dataset',
+                    session_id=None,
+                    threat_id=threat.id if threat else None,
+                    is_threat=is_threat,
+                    label='attack' if is_threat else 'benign',
+                    severity=prediction.get('severity'),
+                    attack_type=prediction.get('threat_type'),
+                    confidence=float(prediction.get('confidence', 0.0) or 0.0),
+                    raw_score=float(prediction.get('raw_prediction', 0.0) or 0.0),
+                    source_ip=_get_pseudo_ip(record, prediction.get('threat_type'), True),
+                    destination_ip=_get_pseudo_ip(record, prediction.get('threat_type'), False),
+                )
+                db.session.add(pred_row)
+                db.session.commit()
             
             return jsonify({
                 'processed': len(results),
@@ -255,84 +402,24 @@ def start_streaming():
     try:
         data = request.get_json() or {}
         interval = data.get('interval', 2.0)
-        use_dataset = data.get('use_dataset', True)
         # Optional explicit source for streaming: 'dataset' | 'api' | 'mock'
-        source = data.get('source')
+        source = data.get('source') or ('dataset' if data.get('use_dataset', True) else 'mock')
         api_url = data.get('api_url') or data.get('apiUrl')
-        
-        def process_streaming_data(record_data):
-            """Process each streaming data point"""
-            try:
-                # Make prediction
-                prediction = model_service.predict(record_data)
-                
-                # If threat detected, create threat record
-                is_threat = bool(prediction.get('is_threat'))
-                if is_threat:
-                    from database.models import Threat
-                    from database.db import db
-                    from services.action_service import action_service
-                    
-                    threat = Threat(
-                        threat_type=prediction['threat_type'],
-                        severity=prediction['severity'],
-                        source_ip=record_data.get('srcip', record_data.get('source_ip', 'Unknown')),
-                        destination_ip=record_data.get('dstip', record_data.get('destination_ip', 'Unknown')),
-                        confidence=prediction['confidence'],
-                        details=record_data,
-                        status='active'
-                    )
-                    
-                    db.session.add(threat)
-                    db.session.commit()
-                    
-                    # Generate actions
-                    actions = action_service.generate_actions(threat)
-                    
-                    # Emit real-time update via WebSocket
-                    if socketio:
-                        socketio.emit('new_threat', {
-                            'threat': threat.to_dict(),
-                            'actions': [action.to_dict() for action in actions],
-                            'prediction': prediction
-                        })
-                else:
-                    # Emit normal activity (optional)
-                    if socketio:
-                        socketio.emit('normal_activity', {
-                            'record': record_data,
-                            'prediction': prediction
-                        })
-
-                # Update high-level metrics regardless of threat / normal
-                metrics_service.on_record_processed(is_threat=is_threat)
-                        
-            except Exception as e:
-                logger.error(f"Error processing streaming data: {str(e)}")
-        
-        # Start streaming
-        data_simulator.start_streaming(
-            process_streaming_data,
-            interval,
-            use_dataset,
+        session_id = data.get('session_id')
+        from flask import current_app
+        app_obj = current_app._get_current_object()
+        result = streaming_service.start(
+            app=app_obj,
+            interval=interval,
             source=source,
             api_url=api_url,
+            session_id=session_id,
         )
 
-        # Notify metrics service about the active source
-        effective_source = source
-        if not effective_source:
-            effective_source = "dataset" if use_dataset else "mock"
-        metrics_service.on_stream_source_configured(effective_source)
+        if not result.get("success"):
+            return jsonify(result), 409
 
-        return jsonify({
-            'success': True,
-            'message': 'Streaming started',
-            'interval': interval,
-            'use_dataset': use_dataset,
-            'source': effective_source,
-            'api_url': api_url,
-        }), 200
+        return jsonify(result), 200
         
     except Exception as e:
         logger.error(f"Error starting streaming: {str(e)}")
@@ -342,11 +429,8 @@ def start_streaming():
 def stop_streaming():
     """Stop streaming dataset"""
     try:
-        data_simulator.stop_streaming()
-        return jsonify({
-            'success': True,
-            'message': 'Streaming stopped'
-        }), 200
+        result = streaming_service.pause()
+        return jsonify(result), 200
         
     except Exception as e:
         logger.error(f"Error stopping streaming: {str(e)}")

@@ -1,31 +1,18 @@
-import React, { useEffect, useState } from 'react';
+import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { Activity } from 'lucide-react';
-import { threatAPI } from '../../services/api';
-import { initSocket } from '../../services/socket';
+import { useThreats } from '../../context/ThreatContext';
 
 const RealTimeMonitoring = () => {
-  const [recent, setRecent] = useState([]);
+  const { threats } = useThreats();
 
-  const load = async () => {
-    try {
-      const res = await threatAPI.getThreats({ limit: 8 });
-      setRecent((res.data.threats || []).slice(0, 4));
-    } catch {
-      setRecent([]);
-    }
-  };
-
-  useEffect(() => {
-    load();
-    const socket = initSocket();
-    socket.on('new_threat', () => load());
-    const interval = setInterval(load, 3000);
-    return () => {
-      socket.off('new_threat');
-      clearInterval(interval);
-    };
-  }, []);
+  const recent = useMemo(() => {
+    if (!threats || threats.length === 0) return [];
+    const sorted = [...threats].sort(
+      (a, b) => new Date(b.timestamp) - new Date(a.timestamp),
+    );
+    return sorted.slice(0, 4);
+  }, [threats]);
 
   return (
     <div className="space-y-3">

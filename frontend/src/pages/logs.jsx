@@ -1,58 +1,51 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { FileText, Download, RefreshCw } from 'lucide-react';
-import { threatAPI } from '../services/api';
-import { initSocket } from '../services/socket';
+import { useThreats } from '../context/ThreatContext';
 import '../styles/App.css';
 
 const Logs = () => {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all'); // 'all', 'ERROR', 'WARNING', 'INFO'
+  const { threats, loading: threatsLoading } = useThreats();
 
-  useEffect(() => {
-    loadLogs();
-    const socket = initSocket();
-    socket.on('new_threat', loadLogs);
-    socket.on('threat_updated', loadLogs);
-
-    const interval = setInterval(loadLogs, 10000);
-    return () => {
-      socket.off('new_threat');
-      socket.off('threat_updated');
-      clearInterval(interval);
-    };
-  }, []);
-
-  const loadLogs = async () => {
-    try {
-      setLoading(true);
-      const response = await threatAPI.getThreats({ limit: 100 });
-      const threats = response.data.threats || [];
-      
-      // Convert threats to log entries
-      const logEntries = threats.map((threat) => ({
+  const buildLogsFromThreats = (sourceThreats) => {
+    return (sourceThreats || [])
+      .map((threat) => ({
         id: threat.id,
         timestamp: threat.timestamp,
-        level: threat.severity === 'Critical' ? 'ERROR' : 
-               threat.severity === 'High' ? 'WARNING' : 'INFO',
-        message: `${threat.threat_type} detected from ${threat.source_ip || 'Unknown'}`,
+        level:
+          threat.severity === 'Critical'
+            ? 'ERROR'
+            : threat.severity === 'High'
+            ? 'WARNING'
+            : 'INFO',
+        message: `${threat.threat_type} detected from ${
+          threat.source_ip || 'Unknown'
+        }`,
         severity: threat.severity,
         threatType: threat.threat_type,
         sourceIp: threat.source_ip,
         destinationIp: threat.destination_ip,
         confidence: threat.confidence,
-      })).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-      
-      setLogs(logEntries);
-    } catch (err) {
-      // Silently handle network errors (backend not running or network issues)
-      if (!err.isNetworkError && err.code !== 'ERR_NETWORK' && err.code !== 'ERR_NETWORK_CHANGED' && err.code !== 'ECONNABORTED') {
-        console.error('Error loading logs:', err);
-      }
-    } finally {
-      setLoading(false);
-    }
+      }))
+      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+  };
+
+  useEffect(() => {
+    // Build logs list from global threats (sorted newest first)
+    const logEntries = buildLogsFromThreats(threats);
+    setLogs(logEntries);
+    setLoading(false);
+  }, [threats]);
+
+  const handleRefresh = () => {
+    // Rebuild from latest threats; ThreatContext already keeps data fresh
+    setLoading(true);
+    const logEntries = buildLogsFromThreats(threats);
+    setLogs(logEntries);
+    setLoading(false);
   };
 
   const handleExport = () => {
@@ -114,7 +107,7 @@ const Logs = () => {
             </div>
             <div className="flex gap-3">
               <button
-                onClick={loadLogs}
+                onClick={handleRefresh}
                 disabled={loading}
                 className="btn-primary flex items-center gap-2"
               >

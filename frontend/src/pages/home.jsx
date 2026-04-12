@@ -8,8 +8,7 @@ import ModelInsightsRow from '../components/Dashboard/ModelInsightsRow';
 import MonitoringAlertsRow from '../components/Dashboard/MonitoringAlertsRow';
 import ReportsLogsCard from '../components/Dashboard/ReportsLogsCard';
 import { useDashboardStore } from '../store/dashboardStore';
-import { threatAPI } from '../services/api';
-import { initSocket } from '../services/socket';
+import { useThreats } from '../context/ThreatContext';
 
 const Home = () => {
   const { 
@@ -20,53 +19,26 @@ const Home = () => {
     updateLastUpdate 
   } = useDashboardStore();
 
+  const { threats, activeThreats } = useThreats();
+
+  // Keep dashboard summary in sync with centralized threat data
   useEffect(() => {
-    // Load initial threats
-    const loadThreats = async () => {
-      try {
-        const response = await threatAPI.getThreats({ status: 'active', limit: 100 });
-        const threats = response.data.threats || [];
-        setThreats(threats);
-        setTotalActiveThreats(threats.length);
-        
-        // Calculate safe requests (mock for now)
-        setSafeRequests(Math.floor(Math.random() * 10000) + 5000);
-        setServerHealth(95 + Math.floor(Math.random() * 5));
-        updateLastUpdate();
-      } catch (err) {
-        // Silently handle network errors (backend not running or network issues)
-        if (!err.isNetworkError && err.code !== 'ERR_NETWORK' && err.code !== 'ERR_NETWORK_CHANGED' && err.code !== 'ECONNABORTED') {
-          console.error('Error loading threats:', err);
-        }
-      }
-    };
-
-    loadThreats();
-
-    // Set up WebSocket for real-time updates
-    const socket = initSocket();
-    
-    socket.on('new_threat', (data) => {
-      loadThreats();
-      updateLastUpdate();
-    });
-
-    socket.on('threat_updated', () => {
-      loadThreats();
-      updateLastUpdate();
-    });
-
-    // Auto-refresh every 5 seconds
-    const refreshInterval = setInterval(() => {
-      loadThreats();
-    }, 5000);
-
-    return () => {
-      socket.off('new_threat');
-      socket.off('threat_updated');
-      clearInterval(refreshInterval);
-    };
-  }, [setThreats, setTotalActiveThreats, setSafeRequests, setServerHealth, updateLastUpdate]);
+    const list = threats || [];
+    setThreats(list);
+    setTotalActiveThreats(activeThreats.length);
+    // Calculate safe requests and server health (same behavior as before)
+    setSafeRequests(Math.floor(Math.random() * 10000) + 5000);
+    setServerHealth(95 + Math.floor(Math.random() * 5));
+    updateLastUpdate();
+  }, [
+    threats,
+    activeThreats,
+    setThreats,
+    setTotalActiveThreats,
+    setSafeRequests,
+    setServerHealth,
+    updateLastUpdate,
+  ]);
 
   return (
     <main className="main-content">

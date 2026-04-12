@@ -4,63 +4,39 @@ import { Activity, AlertCircle, Globe, ArrowRight } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import RealTimeMonitoring from './RealTimeMonitoring';
 import AlertCenter from './AlertCenter';
-import { threatAPI } from '../../services/api';
-import { initSocket } from '../../services/socket';
+import { useThreats } from '../../context/ThreatContext';
 
 const MonitoringAlertsRow = () => {
   const navigate = useNavigate();
   const [riskyAPIs, setRiskyAPIs] = useState([]);
+  const { threats } = useThreats();
 
   useEffect(() => {
-    const loadRiskyAPIs = async () => {
-      try {
-        const response = await threatAPI.getThreats({ limit: 20 });
-        const threats = response.data.threats || [];
-        
-        // Group by API endpoint (using destination_ip as proxy)
-        const apiMap = threats.reduce((acc, threat) => {
-          const api = threat.destination_ip || 'Unknown';
-          if (!acc[api]) {
-            acc[api] = {
-              endpoint: api,
-              count: 0,
-              maxSeverity: 'Low',
-              lastDetected: threat.timestamp,
-            };
-          }
-          acc[api].count++;
-          const severityOrder = ['Low', 'Medium', 'High', 'Critical'];
-          if (severityOrder.indexOf(threat.severity) > severityOrder.indexOf(acc[api].maxSeverity)) {
-            acc[api].maxSeverity = threat.severity;
-          }
-          return acc;
-        }, {});
-
-        setRiskyAPIs(
-          Object.values(apiMap)
-            .sort((a, b) => b.count - a.count)
-            .slice(0, 5)
-        );
-      } catch (err) {
-        // Silently handle network errors (backend not running or network issues)
-        if (!err.isNetworkError && err.code !== 'ERR_NETWORK' && err.code !== 'ERR_NETWORK_CHANGED' && err.code !== 'ECONNABORTED') {
-          console.error('Error loading risky APIs:', err);
-        }
+    // Group by API endpoint (destination_ip) based on global threats list
+    const apiMap = threats.reduce((acc, threat) => {
+      const api = threat.destination_ip || 'Unknown';
+      if (!acc[api]) {
+        acc[api] = {
+          endpoint: api,
+          count: 0,
+          maxSeverity: 'Low',
+          lastDetected: threat.timestamp,
+        };
       }
-    };
+      acc[api].count++;
+      const severityOrder = ['Low', 'Medium', 'High', 'Critical'];
+      if (severityOrder.indexOf(threat.severity) > severityOrder.indexOf(acc[api].maxSeverity)) {
+        acc[api].maxSeverity = threat.severity;
+      }
+      return acc;
+    }, {});
 
-    loadRiskyAPIs();
-    const socket = initSocket();
-    socket.on('new_threat', loadRiskyAPIs);
-    socket.on('threat_updated', loadRiskyAPIs);
-
-    const interval = setInterval(loadRiskyAPIs, 5000);
-    return () => {
-      socket.off('new_threat');
-      socket.off('threat_updated');
-      clearInterval(interval);
-    };
-  }, []);
+    setRiskyAPIs(
+      Object.values(apiMap)
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 5)
+    );
+  }, [threats]);
 
   const getSeverityColor = (severity) => {
     switch (severity) {
