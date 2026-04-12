@@ -8,7 +8,7 @@ backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
-from database.models import Threat
+from database.models import Threat, Prediction
 from database.db import db
 from services.model_service import model_service
 from services.action_service import action_service
@@ -33,8 +33,11 @@ def detect_threat():
         
         # Make prediction using model
         prediction = model_service.predict(data)
-        
-        if prediction.get('is_threat'):
+
+        is_threat = bool(prediction.get('is_threat'))
+        threat = None
+
+        if is_threat:
             # Create threat record
             threat = Threat(
                 threat_type=prediction['threat_type'],
@@ -45,10 +48,27 @@ def detect_threat():
                 details=data,
                 status='active'
             )
-            
             db.session.add(threat)
-            db.session.commit()
-            
+            db.session.flush()
+
+        # Log prediction for analytics
+        pred_row = Prediction(
+            source_type='realtime',
+            session_id=None,
+            threat_id=threat.id if threat else None,
+            is_threat=is_threat,
+            label='attack' if is_threat else 'benign',
+            severity=prediction.get('severity'),
+            attack_type=prediction.get('threat_type'),
+            confidence=float(prediction.get('confidence', 0.0) or 0.0),
+            raw_score=float(prediction.get('raw_prediction', 0.0) or 0.0),
+            source_ip=data.get('srcip', data.get('source_ip', 'Unknown')),
+            destination_ip=data.get('dstip', data.get('destination_ip', 'Unknown')),
+        )
+        db.session.add(pred_row)
+        db.session.commit()
+
+        if is_threat:
             # Generate suggested actions
             actions = action_service.generate_actions(threat)
             

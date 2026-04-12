@@ -14,6 +14,10 @@ from routes.threats import threats_bp
 from routes.actions import actions_bp
 from routes.model import model_bp
 from routes.dataset import dataset_bp
+from routes.report import report_bp
+from routes.stream import stream_bp
+from routes.analytics import analytics_bp
+from services import streaming_service as streaming_service_module
 from services.metrics_service import metrics_service
 from database.db import init_db, db
 from config import Config
@@ -34,38 +38,27 @@ threats.socketio = socketio
 actions.socketio = socketio
 dataset.socketio = socketio
 
+# Set socketio in streaming service
+streaming_service_module.socketio = socketio
+
 # Register blueprints
 app.register_blueprint(threats_bp, url_prefix='/api/threats')
 app.register_blueprint(actions_bp, url_prefix='/api/actions')
 app.register_blueprint(model_bp, url_prefix='/api/model')
 app.register_blueprint(dataset_bp, url_prefix='/api/dataset')
+app.register_blueprint(report_bp, url_prefix='/api/report')
+app.register_blueprint(stream_bp, url_prefix='/api/stream')
+app.register_blueprint(analytics_bp, url_prefix='/api/analytics')
 
 
 @app.route('/api/metrics', methods=['GET'])
 def get_metrics():
     """
     Unified metrics endpoint for dashboard consumption.
-
-    Returns:
-        {
-          "dataset": {
-            "source": "dataset" | "api" | "mock",
-            "totalRecords": int,
-            "currentIndex": int,
-            "threatsDetected": int,
-            "remaining": int
-          },
-          "models": {
-            "cnn": {...},
-            "lstm": {...},
-            "cnn_lstm": {...}
-          },
-          "training": {
-            "inProgress": bool
-          }
-        }
+    Model metrics are read from DB (latest TrainingSession) when available.
     """
-    payload = metrics_service.get_full_metrics_payload()
+    from flask import current_app
+    payload = metrics_service.get_full_metrics_payload(app=current_app)
     return jsonify(payload), 200
 
 # Initialize database

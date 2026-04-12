@@ -2,60 +2,39 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Play, CheckCircle, ChevronDown, ChevronUp } from 'lucide-react';
 import { threatAPI, actionAPI } from '../../services/api';
-import { initSocket } from '../../services/socket';
 import { useDashboardStore } from '../../store/dashboardStore';
+import { useThreats } from '../../context/ThreatContext';
 
 const AlertCenter = () => {
   const [threats, setThreats] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const { activeThreats, loading, error } = useThreats();
   const [expandedThreat, setExpandedThreat] = useState(null);
   const [executingActionId, setExecutingActionId] = useState(null);
   const { setSelectedThreat, setTotalActiveThreats } = useDashboardStore();
 
+  // Sync local list (for expanded state and actions) with global active threats
   useEffect(() => {
-    const socket = initSocket();
-    fetchThreats();
-    socket.on('new_threat', fetchThreats);
-    socket.on('threat_updated', fetchThreats);
-    socket.on('action_executed', (data) => {
-      if (data?.threat_id) loadThreatActions(data.threat_id);
-      else fetchThreats();
+    const list = activeThreats.slice(0, 10);
+    setThreats((prevThreats) => {
+      return list.map((incoming) => {
+        const existing = prevThreats.find(t => t.id === incoming.id);
+        if (existing && existing.actions) {
+          return { ...incoming, actions: existing.actions };
+        }
+        return incoming;
+      });
     });
-    return () => {
-      socket.off('new_threat');
-      socket.off('threat_updated');
-      socket.off('action_executed');
-    };
-  }, []);
-
-  const fetchThreats = async () => {
-    try {
-      setLoading(true);
-      const response = await threatAPI.getThreats({ status: 'active', limit: 10 });
-      const threatsData = response.data.threats || [];
-      setThreats(threatsData);
-      setTotalActiveThreats(threatsData.length);
-      setError(null);
-    } catch (err) {
-      // Silently handle network errors (backend not running or network issues)
-      if (err.isNetworkError || err.code === 'ERR_NETWORK' || err.code === 'ERR_NETWORK_CHANGED' || err.code === 'ECONNABORTED') {
-        setError(null); // Don't show error for network issues
-      } else {
-        console.error('Error fetching threats:', err);
-        setError('Failed to load threats');
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
+    setTotalActiveThreats(list.length);
+  }, [activeThreats, setTotalActiveThreats]);
 
   const loadThreatActions = async (threatId) => {
     try {
       const response = await threatAPI.getThreatActions(threatId);
-      setThreats(prev => prev.map(t => 
-        t.id === threatId ? { ...t, actions: response.data.actions } : t
-      ));
+      setThreats(prev =>
+        prev.map(t =>
+          t.id === threatId ? { ...t, actions: response.data.actions } : t
+        )
+      );
     } catch (err) {
       // Silently handle network errors (backend not running or network issues)
       if (!err.isNetworkError && err.code !== 'ERR_NETWORK' && err.code !== 'ERR_NETWORK_CHANGED' && err.code !== 'ECONNABORTED') {

@@ -1,47 +1,22 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { AlertCircle, TrendingUp } from 'lucide-react';
-import { threatAPI } from '../../services/api';
-import { initSocket } from '../../services/socket';
+import { useThreats } from '../../context/ThreatContext';
+import { useDashboardStore } from '../../store/dashboardStore';
 
 const RiskAssessmentCard = () => {
-  const [threats, setThreats] = useState([]);
   const [hoveredApi, setHoveredApi] = useState(null);
-  const [riskLevel, setRiskLevel] = useState(0);
+  const { threats } = useThreats();
+  const { datasetStats } = useDashboardStore();
 
-  useEffect(() => {
-    const loadThreats = async () => {
-      try {
-        const response = await threatAPI.getThreats({ limit: 50 });
-        const threatsData = response.data.threats || [];
-        setThreats(threatsData);
-        
-        // Calculate overall risk level
-        const criticalCount = threatsData.filter(t => t.severity === 'Critical').length;
-        const highCount = threatsData.filter(t => t.severity === 'High').length;
-        const total = threatsData.length;
-        const risk = total > 0 ? ((criticalCount * 100 + highCount * 60) / total) : 0;
-        setRiskLevel(Math.min(100, risk));
-      } catch (err) {
-        // Silently handle network errors (backend not running or network issues)
-        if (!err.isNetworkError && err.code !== 'ERR_NETWORK' && err.code !== 'ERR_NETWORK_CHANGED' && err.code !== 'ECONNABORTED') {
-          console.error('Error loading threats:', err);
-        }
-      }
-    };
-
-    loadThreats();
-    const socket = initSocket();
-    socket.on('new_threat', loadThreats);
-    socket.on('threat_updated', loadThreats);
-
-    const interval = setInterval(loadThreats, 5000);
-    return () => {
-      socket.off('new_threat');
-      socket.off('threat_updated');
-      clearInterval(interval);
-    };
-  }, []);
+  // Calculate overall risk level from processed_records vs threats_detected (metrics-based)
+  const baseRiskLevel = useMemo(() => {
+    const processed = datasetStats?.currentIndex || 0;
+    const threatsDetected = datasetStats?.threatsDetected || datasetStats?.threats || 0;
+    if (!processed || processed <= 0) return 0;
+    const ratio = threatsDetected / processed; // 0–1
+    return Math.min(100, ratio * 100);        // expressed as percentage
+  }, [datasetStats]);
 
   // Get top risky IPs/APIs
   const riskyIPs = Object.values(
@@ -86,12 +61,6 @@ const RiskAssessmentCard = () => {
     }
   };
 
-  const displayRiskLevel = hoveredApi 
-    ? (hoveredApi.maxSeverity === 'Critical' ? 90 : 
-       hoveredApi.maxSeverity === 'High' ? 70 : 
-       hoveredApi.maxSeverity === 'Medium' ? 50 : 30)
-    : riskLevel;
-
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.95 }}
@@ -108,13 +77,13 @@ const RiskAssessmentCard = () => {
         <div>
           <div className="flex items-center justify-between mb-2">
             <span className="text-sm text-gray-400">Overall Risk Level</span>
-            <span className="text-lg font-bold text-white">{Math.round(displayRiskLevel)}%</span>
+            <span className="text-lg font-bold text-white">{Math.round(baseRiskLevel)}%</span>
           </div>
           <div className="w-full bg-dark-border rounded-full h-4 overflow-hidden">
             <motion.div
-              className={`h-full ${getRiskColor(displayRiskLevel)}`}
+              className={`h-full ${getRiskColor(baseRiskLevel)}`}
               initial={{ width: 0 }}
-              animate={{ width: `${displayRiskLevel}%` }}
+              animate={{ width: `${baseRiskLevel}%` }}
               transition={{ duration: 0.5 }}
             />
           </div>

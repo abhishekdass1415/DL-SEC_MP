@@ -8,16 +8,8 @@ const ThreatAnalyticsPage = () => {
       <div className="w-full max-w-7xl">
         <h1 className="dashboard-title">Threat Analytics</h1>
         <div className="page-content">
-        <ThreatAnalytics />
-        <div className="widget">
-          <h3>Threat Detection History</h3>
-          <p>Comprehensive threat detection history and trends.</p>
+          <ThreatAnalytics />
         </div>
-        <div className="widget">
-          <h3>Top Threat Sources</h3>
-          <p>Analysis of top threat sources and their patterns.</p>
-        </div>
-      </div>
       </div>
     </main>
   );

@@ -1,49 +1,61 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Download, FileText, Clock } from 'lucide-react';
-import { threatAPI } from '../../services/api';
+import { useThreats } from '../../context/ThreatContext';
+import { reportAPI } from '../../services/api';
 
 const ReportsLogsCard = () => {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(false);
+  const { threats } = useThreats();
 
   useEffect(() => {
-    loadRecentLogs();
-    const interval = setInterval(loadRecentLogs, 10000);
-    return () => clearInterval(interval);
-  }, []);
+    // Derive recent logs from global threats (top 5)
+    const latest = [...(threats || [])]
+      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+      .slice(0, 5);
 
-  const loadRecentLogs = async () => {
-    try {
-      const response = await threatAPI.getThreats({ limit: 5 });
-      const threats = response.data.threats || [];
-      
-      // Convert threats to log entries
-      const logEntries = threats.map((threat, index) => ({
-        id: threat.id,
-        timestamp: threat.timestamp,
-        level: threat.severity === 'Critical' ? 'ERROR' : 
-               threat.severity === 'High' ? 'WARNING' : 'INFO',
-        message: `${threat.threat_type} detected from ${threat.source_ip}`,
-        severity: threat.severity,
-      }));
-      
-      setLogs(logEntries);
-    } catch (err) {
-      // Silently handle network errors (backend not running or network issues)
-      if (!err.isNetworkError && err.code !== 'ERR_NETWORK' && err.code !== 'ERR_NETWORK_CHANGED' && err.code !== 'ECONNABORTED') {
-        console.error('Error loading logs:', err);
-      }
-    }
-  };
+    const logEntries = latest.map((threat) => ({
+      id: threat.id,
+      timestamp: threat.timestamp,
+      level:
+        threat.severity === 'Critical'
+          ? 'ERROR'
+          : threat.severity === 'High'
+          ? 'WARNING'
+          : 'INFO',
+      message: `${threat.threat_type} detected from ${threat.source_ip}`,
+      severity: threat.severity,
+    }));
+    setLogs(logEntries);
+  }, [threats]);
 
-  const handleExport = () => {
+  const handleExport = async () => {
     setLoading(true);
-    // Simulate export
-    setTimeout(() => {
-      alert('Report exported successfully!');
+    try {
+      const response = await reportAPI.generate();
+      const blob = new Blob([response.data], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+
+      const contentDisposition = response.headers?.['content-disposition'] || '';
+      const match = contentDisposition.match(/filename="?([^"]+)"?/);
+      const filename = match?.[1] || `dl-sec-report-${new Date().toISOString().split('T')[0]}.pdf`;
+
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      // Keep UI resilient; avoid crashing on network errors
+      const msg =
+        err?.isNetworkError
+          ? 'Backend server is not available. Please ensure the backend is running.'
+          : 'Failed to export report.';
+      alert(msg);
+    } finally {
       setLoading(false);
-    }, 1000);
+    }
   };
 
   const getLevelColor = (level) => {

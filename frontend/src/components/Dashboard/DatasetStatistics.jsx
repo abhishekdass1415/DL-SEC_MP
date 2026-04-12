@@ -22,7 +22,7 @@ const DatasetStatistics = () => {
     };
 
     loadStats();
-    const interval = setInterval(loadStats, 5000);
+    const interval = setInterval(loadStats, 10000);
     return () => clearInterval(interval);
   }, []);
 
@@ -37,7 +37,7 @@ const DatasetStatistics = () => {
       bgColor: 'bg-primary-cyan/10',
     },
     {
-      label: 'Processed',
+      label: 'Scanned Index',
       value: displayStats?.currentIndex || 0,
       icon: CheckCircle,
       color: 'text-primary-green',

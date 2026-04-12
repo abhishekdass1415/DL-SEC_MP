@@ -35,7 +35,8 @@ class MetricsService:
 
         # Training state
         self.training_in_progress = False
-        self._lock = threading.Lock()
+        # Re-entrant lock to avoid deadlocks when payload builders call each other
+        self._lock = threading.RLock()
 
         # Try to load any persisted metrics from disk
         self._load_persisted_metrics()
@@ -95,7 +96,27 @@ class MetricsService:
     # ------------------------------------------------------------------
     # Model metrics helpers
     # ------------------------------------------------------------------
-    def get_model_metrics(self) -> Dict[str, Dict[str, float]]:
+    def get_model_metrics(self, app=None) -> Dict[str, Dict[str, float]]:
+        """Return model metrics. If app is provided, prefer latest from DB (ModelMetrics)."""
+        if app is not None:
+            try:
+                with app.app_context():
+                    from database.models import ModelMetrics
+                    latest = ModelMetrics.query.order_by(ModelMetrics.created_at.desc()).first()
+                    if latest is not None:
+                        m = {
+                            "accuracy": latest.accuracy,
+                            "precision": latest.precision,
+                            "recall": latest.recall,
+                            "f1": latest.f1_score,
+                        }
+                        return {
+                            "cnn": m.copy(),
+                            "lstm": m.copy(),
+                            "cnn_lstm": m.copy(),
+                        }
+            except Exception as exc:
+                logger.warning("Could not load model metrics from DB: %s", exc)
         with self._lock:
             return self.model_metrics.copy()
 
@@ -152,13 +173,12 @@ class MetricsService:
                 "remaining": remaining,
             }
 
-    def get_full_metrics_payload(self) -> Dict[str, Any]:
-        """Full payload used by /api/metrics."""
+    def get_full_metrics_payload(self, app=None) -> Dict[str, Any]:
+        """Full payload used by /api/metrics. If app provided, model metrics may come from DB."""
         with self._lock:
             dataset_metrics = self.get_dataset_metrics_payload()
-            models = self.model_metrics.copy()
             training = self.training_in_progress
-
+        models = self.get_model_metrics(app=app)
         return {
             "dataset": dataset_metrics,
             "models": models,

@@ -81,8 +81,8 @@ export const datasetAPI = {
   getDatasetStats: () => api.get('/dataset/stats'),
   getSampleRecords: (n = 5) => api.get('/dataset/sample', { params: { n } }),
   processDataset: (batchSize = 1) => api.post('/dataset/process', { batch_size: batchSize }),
-  startStreaming: (interval = 2.0, useDataset = true, source = 'dataset', apiUrl = null) => 
-    api.post('/dataset/stream/start', { interval, use_dataset: useDataset, source, api_url: apiUrl }),
+  startStreaming: (interval = 2.0, useDataset = true, source = 'dataset', apiUrl = null, sessionId = null) => 
+    api.post('/dataset/stream/start', { interval, use_dataset: useDataset, source, api_url: apiUrl, session_id: sessionId }),
   stopStreaming: () => api.post('/dataset/stream/stop'),
   getStreamingStatus: () => api.get('/dataset/stream/status'),
   resetDataset: () => api.post('/dataset/reset'),
@@ -92,6 +92,33 @@ export const datasetAPI = {
 
 export const metricsAPI = {
   getMetrics: () => api.get('/metrics'),
+};
+
+export const analyticsAPI = {
+  getSummary: () => api.get('/analytics/summary'),
+};
+
+export const reportAPI = {
+  generate: () =>
+    api.post('/report/generate', null, {
+      responseType: 'blob',
+      timeout: 60000,
+    }),
+};
+
+// New streaming endpoints (Phase 3 spec). Backward compatible with /dataset/stream/*
+export const streamAPI = {
+  start: ({ interval = 2.0, source = 'dataset', apiUrl = null, sessionId = null } = {}) =>
+    api.post('/stream/start', {
+      interval,
+      source,
+      api_url: apiUrl,
+      session_id: sessionId,
+      use_dataset: source === 'dataset',
+    }),
+  pause: () => api.post('/stream/pause'),
+  reset: () => api.post('/stream/reset'),
+  status: () => api.get('/stream/status'),
 };
 
 export default api;

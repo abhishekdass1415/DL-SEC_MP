@@ -16,11 +16,10 @@ const Header = () => {
   const [notifications, setNotifications] = useState(0);
   
   useEffect(() => {
-    // Update last update time every 5 seconds
+    // UI tick every 10 seconds (no API call)
     const interval = setInterval(() => {
       updateLastUpdate();
-    }, 5000);
-    
+    }, 10000);
     return () => clearInterval(interval);
   }, [updateLastUpdate]);
   

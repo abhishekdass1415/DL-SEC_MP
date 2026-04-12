@@ -187,3 +187,44 @@ class Alert(db.Model):
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
 
+
+class Prediction(db.Model):
+    """Per-record prediction log for analytics (covers both threats and normal traffic)."""
+    __tablename__ = 'predictions'
+
+    id = db.Column(db.Integer, primary_key=True)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    source_type = db.Column(db.String(20), nullable=False, default='dataset')  # dataset, api, mock, realtime
+    session_id = db.Column(db.Integer, db.ForeignKey('streaming_sessions.id'), nullable=True)
+    threat_id = db.Column(db.Integer, db.ForeignKey('threats.id'), nullable=True)
+
+    is_threat = db.Column(db.Boolean, nullable=False, default=False)
+    label = db.Column(db.String(50))  # benign, suspicious, attack, critical attack
+    severity = db.Column(db.String(20))  # Critical, High, Medium, Low
+    attack_type = db.Column(db.String(100))
+    confidence = db.Column(db.Float)
+    raw_score = db.Column(db.Float)
+
+    source_ip = db.Column(db.String(50))
+    destination_ip = db.Column(db.String(50))
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'timestamp': self.timestamp.isoformat(),
+            'source_type': self.source_type,
+            'session_id': self.session_id,
+            'threat_id': self.threat_id,
+            'is_threat': self.is_threat,
+            'label': self.label,
+            'severity': self.severity,
+            'attack_type': self.attack_type,
+            'confidence': self.confidence,
+            'raw_score': self.raw_score,
+            'source_ip': self.source_ip,
+            'destination_ip': self.destination_ip,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+

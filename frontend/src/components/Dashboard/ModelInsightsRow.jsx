@@ -89,14 +89,9 @@ const ModelInsightsRow = () => {
   const Metric = ({ label, value }) => (
     <div className="flex items-center justify-between">
       <span className="text-sm text-gray-300">{label}</span>
-      <motion.span
-        key={value}
-        initial={{ scale: 1.2 }}
-        animate={{ scale: 1 }}
-        className="text-lg font-bold text-white"
-      >
+      <span className="text-lg font-bold text-white">
         {(value * 100).toFixed(1)}%
-      </motion.span>
+      </span>
     </div>
   );
 

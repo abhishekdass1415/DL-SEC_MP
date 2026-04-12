@@ -7,6 +7,7 @@ import { useDashboardStore } from '../../store/dashboardStore';
 
 const DatasetManager = () => {
   const [datasetStats, setDatasetStats] = useState(null);
+  const [datasetLoaded, setDatasetLoaded] = useState(false);
   const [streamingStatus, setStreamingStatus] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -16,24 +17,37 @@ const DatasetManager = () => {
   const [progress, setProgress] = useState(0);
   const [dataSource, setDataSource] = useState('dataset'); // 'dataset' | 'api'
   const [apiUrl, setApiUrl] = useState('');
+  const [sessionId, setSessionId] = useState(null);
   
   const { setDatasetStats: setStoreStats, setStreamingStatus: setStoreStreaming } = useDashboardStore();
+
+  useEffect(() => {
+    console.log("Dataset loaded state:", datasetLoaded);
+  }, [datasetLoaded]);
 
   useEffect(() => {
     loadStats();
     loadStreamingStatus();
     
     const socket = initSocket();
-    socket.on('new_threat', () => {
-      loadStats();
+    socket.on('metrics_update', (payload) => {
+      const stats = payload?.dataset || null;
+      if (stats) {
+        setDatasetStats(stats);
+        setStoreStats(stats);
+        if (stats.totalRecords && stats.currentIndex) {
+          setProgress((stats.currentIndex / stats.totalRecords) * 100);
+        }
+        if (stats.totalRecords) setDatasetLoaded(true);
+      }
     });
     
     const statusInterval = setInterval(() => {
       loadStreamingStatus();
-    }, 2000);
+    }, 5000);
     
     return () => {
-      socket.off('new_threat');
+      socket.off('metrics_update');
       clearInterval(statusInterval);
     };
   }, []);
@@ -46,6 +60,9 @@ const DatasetManager = () => {
       setStoreStats(stats);
       if (stats.totalRecords && stats.currentIndex) {
         setProgress((stats.currentIndex / stats.totalRecords) * 100);
+      }
+      if (stats.totalRecords) {
+        setDatasetLoaded(true);
       }
       setError(null);
     } catch (err) {
@@ -87,6 +104,12 @@ const DatasetManager = () => {
 
     try {
       const response = await datasetAPI.uploadDataset(file);
+      if (response.data?.success !== false && (response.data?.total_records ?? 0) > 0) {
+        setDatasetLoaded(true);
+      }
+      if (response.data?.session_id != null) {
+        setSessionId(response.data.session_id);
+      }
       setSuccess(`Dataset loaded: ${response.data.total_records} records`);
       setFile(null);
       await loadStats();
@@ -118,6 +141,9 @@ const DatasetManager = () => {
 
     try {
       const response = await datasetAPI.loadDataset(fullPath);
+      if (response.data?.success !== false && (response.data?.total_records ?? 0) > 0) {
+        setDatasetLoaded(true);
+      }
       setSuccess(`Dataset loaded: ${response.data.total_records} records`);
       await loadStats();
     } catch (err) {
@@ -145,6 +171,7 @@ const DatasetManager = () => {
         dataSource !== 'api', // use_dataset flag
         dataSource === 'api' ? 'api' : 'dataset',
         dataSource === 'api' ? apiUrl : null,
+        sessionId,
       );
       setSuccess('Streaming started');
       setStreamingStatus(true);
@@ -304,6 +331,7 @@ const DatasetManager = () => {
                 type="button"
                 onClick={() => setDataSource('api')}
                 disabled={streamingStatus}
+                title="Listen and ingest live events from an external network API endpoint."
                 className={`px-3 py-2 rounded-lg text-sm flex items-center justify-center gap-2 border ${
                   dataSource === 'api'
                     ? 'bg-primary-blue/20 border-primary-blue text-primary-cyan'
@@ -356,7 +384,7 @@ const DatasetManager = () => {
                   onClick={handleStartStreaming}
                   disabled={
                     loading ||
-                    (dataSource === 'dataset' && (!datasetStats || !datasetStats.totalRecords)) ||
+                    (dataSource === 'dataset' && !datasetLoaded && (!datasetStats || !datasetStats.totalRecords)) ||
                     (dataSource === 'api' && !apiUrl)
                   }
                   className="btn-success flex-1 flex items-center justify-center gap-2"
@@ -399,6 +427,7 @@ const DatasetManager = () => {
               <button
                 onClick={handleProcessBatch}
                 disabled={loading || !datasetStats || streamingStatus}
+                title="Manually process 10 records instantaneously without starting the background stream."
                 className="btn-primary flex-1 flex items-center justify-center gap-2"
               >
                 <FileText className="w-4 h-4" />
@@ -409,29 +438,6 @@ const DatasetManager = () => {
         </div>
       </div>
 
-      {/* Dataset Statistics Preview */}
-      {datasetStats && !datasetStats.error && (
-        <div className="mt-6 pt-6 border-t border-dark-border">
-          <div className="grid grid-cols-4 gap-4">
-            <div>
-              <div className="text-2xl font-bold text-white">{datasetStats.totalRecords || 0}</div>
-              <div className="text-xs text-gray-400 mt-1">Total Records</div>
-            </div>
-            <div>
-              <div className="text-2xl font-bold text-white">{datasetStats.currentIndex || 0}</div>
-              <div className="text-xs text-gray-400 mt-1">Current Index</div>
-            </div>
-            <div>
-              <div className="text-2xl font-bold text-primary-red">{datasetStats.threatsDetected || datasetStats.threats || 0}</div>
-              <div className="text-xs text-gray-400 mt-1">Threats Detected</div>
-            </div>
-            <div>
-              <div className="text-2xl font-bold text-primary-green">{datasetStats.remaining || datasetStats.remaining_records || 0}</div>
-              <div className="text-xs text-gray-400 mt-1">Remaining</div>
-            </div>
-          </div>
-        </div>
-      )}
     </motion.div>
   );
 };
