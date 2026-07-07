@@ -1,3 +1,4 @@
+#train_model.py
 """
 Production training pipeline for CNN-LSTM on UNSW-NB15.
 Run from project root: python backend/ml/train_model.py
